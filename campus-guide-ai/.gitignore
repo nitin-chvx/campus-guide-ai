@@ -22,3 +22,8 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Environment files: ignore real local configuration, keep example templates
+.env
+.env.*
+!.env.example

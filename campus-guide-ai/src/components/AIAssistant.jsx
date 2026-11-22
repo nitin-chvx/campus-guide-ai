@@ -1,16 +1,23 @@
 import { useEffect, useRef, useState } from "react";
-import campusData from "../data/campusData";
 
-function AIAssistant() {
+function AIAssistant({
+  apiBaseUrl,
+  onViewOnMap,
+  canViewOnMap,
+  selectedBuildingId,
+  selectedBuildingName,
+  onClearBuildingContext,
+}) {
   const [message, setMessage] = useState("");
   const [isTyping, setIsTyping] = useState(false);
 
   const messagesEndRef = useRef(null);
+  const requestInFlightRef = useRef(false);
 
   const [messages, setMessages] = useState([
     {
       role: "ai",
-      text: "Hi! I'm Campus AI. I can help you find verified information about Mangalayatan University.",
+      text: "Hi! I'm the Campus Assistant. I can help you find verified information from the Mangalayatan University directory.",
     },
   ]);
 
@@ -26,172 +33,113 @@ function AIAssistant() {
 
 
   // =========================================================
-  // FIND CAMPUS INFORMATION
-  // =========================================================
-
-  const findCampusInformation = (question) => {
-  const query = question.toLowerCase().trim();
-
-  // Remove common question words
-  const stopWords = [
-    "where",
-    "is",
-    "the",
-    "a",
-    "an",
-    "i",
-    "need",
-    "want",
-    "can",
-    "you",
-    "tell",
-    "me",
-    "about",
-    "please",
-    "find",
-    "show",
-    "located",
-    "location",
-    "of",
-    "for",
-    "on",
-    "in",
-    "at",
-  ];
-
-  // Break question into useful words
-  const words = query
-    .replace(/[?.,!]/g, "")
-    .split(/\s+/)
-    .filter((word) => word && !stopWords.includes(word));
-
-  // Score every campus location
-  const scoredResults = campusData.map((location) => {
-    const searchableText = [
-      location.name,
-      location.type,
-      location.zone,
-      location.description,
-      ...(location.keywords || []),
-    ]
-      .join(" ")
-      .toLowerCase();
-
-    let score = 0;
-
-    // Exact full phrase match
-    if (searchableText.includes(query)) {
-      score += 10;
-    }
-
-    // Match individual useful words
-    words.forEach((word) => {
-      if (searchableText.includes(word)) {
-        score += 2;
-      }
-    });
-
-    // Strong match for location name
-    const nameWords = location.name.toLowerCase().split(/\s+/);
-
-    words.forEach((word) => {
-      if (nameWords.includes(word)) {
-        score += 5;
-      }
-    });
-
-    // Strong match for keywords
-    (location.keywords || []).forEach((keyword) => {
-      const keywordLower = keyword.toLowerCase();
-
-      if (query.includes(keywordLower)) {
-        score += 8;
-      }
-
-      words.forEach((word) => {
-        if (keywordLower.includes(word)) {
-          score += 3;
-        }
-      });
-    });
-
-    return {
-      location,
-      score,
-    };
-  });
-
-  return scoredResults
-    .filter((result) => result.score > 0)
-    .sort((a, b) => b.score - a.score)
-    .map((result) => result.location);
-};
-
-
-  // =========================================================
-  // GENERATE VERIFIED ANSWER
-  // =========================================================
-
-  const generateAnswer = (question) => {
-    const results = findCampusInformation(question);
-
-    if (results.length > 0) {
-      const location = results[0];
-
-      return {
-        text: `${location.name} is listed as a ${location.type}. ${location.description}`,
-        verified: true,
-      };
-    }
-
-    return {
-      text:
-        "I don't have verified information about that yet. I don't want to guess and give you the wrong campus information.",
-      verified: false,
-    };
-  };
-
-
-  // =========================================================
   // SEND MESSAGE
   // =========================================================
 
-  const sendMessage = (customMessage = null) => {
+  const sendMessage = async (customMessage = null, isRetry = false) => {
     const question = (
       customMessage !== null
         ? customMessage
         : message
     ).trim();
 
-    if (!question || isTyping) return;
+    if (!question || requestInFlightRef.current || isTyping) return;
 
-    // Add user message
-    setMessages((prev) => [
-      ...prev,
-      {
-        role: "user",
-        text: question,
-      },
-    ]);
+    requestInFlightRef.current = true;
 
-    setMessage("");
+    if (!isRetry) {
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: "user",
+          text: question,
+        },
+      ]);
+      setMessage("");
+    }
     setIsTyping(true);
 
-    // Simulate response delay
-    setTimeout(() => {
-      const answer = generateAnswer(question);
+    try {
+      const requestBody = { message: question };
+      if (selectedBuildingId) requestBody.buildingId = selectedBuildingId;
+
+      const response = await fetch(`${apiBaseUrl}/api/chat`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(requestBody),
+      });
+
+      let result = null;
+      try {
+        result = await response.json();
+      } catch {
+        // Handle non-JSON responses below with a friendly message.
+      }
+
+      if (!response.ok) {
+        const serverMessage = typeof result?.message === "string"
+          ? result.message.trim()
+          : "";
+        throw new Error(
+          serverMessage ||
+            `Campus AI couldn't answer right now (HTTP ${response.status}). Please try again.`
+        );
+      }
+
+      if (
+        result?.success !== true ||
+        typeof result.answer !== "string" ||
+        !result.answer.trim()
+      ) {
+        throw new Error("Campus AI returned an unexpected response. Please try again.");
+      }
+
+      if (selectedBuildingId && result.contextBuilding?.id !== selectedBuildingId) {
+        throw new Error("The selected campus building could not be verified. Please try again.");
+      }
+
+      setMessages((prev) => [
+        ...prev.map((item) =>
+          item.retryQuestion === question
+            ? { ...item, retryQuestion: undefined }
+            : item
+        ),
+        {
+          role: "ai",
+          text: result.answer.trim(),
+          verified: result.verified === true,
+          buildings: Array.isArray(result.buildings)
+            ? result.buildings.filter((building) =>
+                building?.is_verified === true &&
+                typeof building.name === "string" &&
+                typeof building.type === "string"
+              )
+            : [],
+        },
+      ]);
+    } catch (error) {
+      console.error("Campus chat request failed:", error);
+
+      const errorMessage = error instanceof TypeError
+        ? "I couldn't connect to Campus AI. Check your connection and try again."
+        : error instanceof Error
+          ? error.message
+          : "Campus AI couldn't answer right now. Please try again.";
 
       setMessages((prev) => [
         ...prev,
         {
           role: "ai",
-          text: answer.text,
-          verified: answer.verified,
+          text: errorMessage,
+          retryQuestion: question,
         },
       ]);
-
+    } finally {
+      requestInFlightRef.current = false;
       setIsTyping(false);
-    }, 500);
+    }
   };
 
 
@@ -279,19 +227,35 @@ function AIAssistant() {
             </div>
 
             <div>
-              <strong>Campus AI</strong>
+              <strong>Campus Assistant</strong>
 
               <span>
-                Verified campus assistant
+                Database-backed campus directory
               </span>
             </div>
 
           </div>
 
+          {selectedBuildingId && (
+            <div className="assistant-building-context" aria-live="polite">
+              <div>
+                <span>ASKING ABOUT</span>
+                <strong>{selectedBuildingName || "Verified campus building"}</strong>
+              </div>
+              <button
+                type="button"
+                onClick={onClearBuildingContext}
+                disabled={isTyping}
+              >
+                Clear
+              </button>
+            </div>
+          )}
+
 
           <div className="chat-online">
             <span></span>
-            Online
+            Database mode
           </div>
 
         </div>
@@ -311,7 +275,7 @@ function AIAssistant() {
                 msg.role === "user"
                   ? "user-message"
                   : "ai-message"
-              }`}
+              } ${msg.buildings?.length ? "has-building-results" : ""}`}
             >
 
               {/* AI AVATAR */}
@@ -325,12 +289,90 @@ function AIAssistant() {
 
               <div className="message-wrapper">
 
-                <div className="message-content">
-                  {msg.text}
-                </div>
+                {(!msg.buildings || msg.buildings.length === 0) && (
+                  <div className="message-content">
+                    {msg.text}
+                  </div>
+                )}
+
+                {msg.buildings?.length > 0 && (
+                  <div className="building-result-list">
+                    {msg.buildings.map((building) => {
+                      const hasCoordinates =
+                        Number.isFinite(building.latitude) &&
+                        building.latitude >= -90 &&
+                        building.latitude <= 90 &&
+                        Number.isFinite(building.longitude) &&
+                        building.longitude >= -180 &&
+                        building.longitude <= 180;
+
+                      return (
+                        <article className="building-result-card" key={building.id}>
+                          <div className="building-result-heading">
+                            <div>
+                              <span className="building-result-type">{building.type}</span>
+                              <h3>{building.name}</h3>
+                            </div>
+                            <span className="building-result-verified">Verified</span>
+                          </div>
+
+                          <dl className="building-result-details">
+                            <div>
+                              <dt>Description</dt>
+                              <dd>{building.description || "Unavailable in verified records."}</dd>
+                            </div>
+                            <div>
+                              <dt>Zone</dt>
+                              <dd>{building.zone || "Unavailable in verified records."}</dd>
+                            </div>
+                            <div>
+                              <dt>Coordinates</dt>
+                              <dd>
+                                {hasCoordinates
+                                  ? `${building.latitude}, ${building.longitude}`
+                                  : "Coordinates unavailable"}
+                              </dd>
+                            </div>
+                          </dl>
+
+                          {building.is_verified === true && building.id && (
+                            <div className="building-map-action">
+                            <button
+                              type="button"
+                              className="building-map-button"
+                              disabled={!canViewOnMap?.(building)}
+                              onClick={() => onViewOnMap?.(building)}
+                            >
+                              View on Map
+                              <span aria-hidden="true">→</span>
+                            </button>
+                            {!canViewOnMap?.(building) && (
+                              <small className="building-map-unavailable">
+                                Map selection is unavailable because this record is not in the loaded verified location list.
+                              </small>
+                            )}
+                            </div>
+                          )}
+                        </article>
+                      );
+                    })}
+                  </div>
+                )}
 
 
                 {/* VERIFIED LABEL */}
+
+                {msg.role === "ai" && msg.retryQuestion && (
+                  <button
+                    type="button"
+                    className="suggestion-button"
+                    onClick={() => sendMessage(msg.retryQuestion, true)}
+                    disabled={isTyping}
+                  >
+                    Retry
+                    <span className="suggestion-arrow">↻</span>
+                  </button>
+                )}
 
                 {msg.role === "ai" && msg.verified && (
                   <span className="verified-label">
@@ -467,7 +509,7 @@ function AIAssistant() {
         <span>✦</span>
 
         <p>
-          Campus AI only answers using available
+          The Campus Assistant only answers using available
           verified campus information. It will not
           guess when information is unavailable.
         </p>

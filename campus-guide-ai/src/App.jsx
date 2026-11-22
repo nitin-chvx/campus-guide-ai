@@ -1,16 +1,33 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import "./App.css";
-import campusData from "./data/campusData";
 import AIAssistant from "./components/AIAssistant";
+
+const API_BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
 
 /* =========================================================
    MAP PAGE
    ========================================================= */
 
-function MapPage() {
+function MapPage({ campusLocations, selectedLocationId, onClearSelection, onAskAssistant }) {
   const [search, setSearch] = useState("");
-  const [selectedLocation, setSelectedLocation] = useState(null);
+  const [listSelectedLocation, setListSelectedLocation] = useState(null);
   const [zoom, setZoom] = useState(1);
+  const selectedListItemRef = useRef(null);
+
+  const verifiedCampusLocations = campusLocations.filter((location) =>
+    location.is_verified === true
+  );
+
+  const selectedLocation = verifiedCampusLocations.find((location) =>
+    location.id === selectedLocationId && location.is_verified === true
+  ) || listSelectedLocation;
+
+  useEffect(() => {
+    selectedListItemRef.current?.scrollIntoView({
+      behavior: "smooth",
+      block: "nearest",
+    });
+  }, [selectedLocation?.id, search]);
 
   const getLocationIcon = (type) => {
     if (type === "Library") return "L";
@@ -20,23 +37,22 @@ function MapPage() {
     return "•";
   };
 
-  const filteredLocations = campusData.filter((location) => {
+  const filteredLocations = verifiedCampusLocations.filter((location) => {
     const query = search.toLowerCase().trim();
 
     if (!query) return true;
-
-    const searchableText = [
-      location.name,
-      location.type,
-      location.zone,
-      location.description,
-      ...(location.keywords || []),
-    ]
-      .join(" ")
-      .toLowerCase();
-
-    return searchableText.includes(query);
+    return location.name.toLowerCase().includes(query);
   });
+
+  const hasValidCoordinates = Boolean(
+    selectedLocation?.is_verified === true &&
+    Number.isFinite(selectedLocation.latitude) &&
+    selectedLocation.latitude >= -90 &&
+    selectedLocation.latitude <= 90 &&
+    Number.isFinite(selectedLocation.longitude) &&
+    selectedLocation.longitude >= -180 &&
+    selectedLocation.longitude <= 180
+  );
 
   const zoomIn = () => {
     setZoom((previous) => Math.min(previous + 0.2, 2));
@@ -51,7 +67,21 @@ function MapPage() {
   };
 
   const selectLocation = (location) => {
-    setSelectedLocation(location);
+    setListSelectedLocation(location);
+    onClearSelection?.();
+  };
+
+  const clearSelection = () => {
+    setListSelectedLocation(null);
+    onClearSelection?.();
+  };
+
+  const updateSearch = (value) => {
+    setSearch(value);
+    const query = value.trim().toLowerCase();
+    if (query && selectedLocation && !selectedLocation.name.toLowerCase().includes(query)) {
+      clearSelection();
+    }
   };
 
   return (
@@ -154,24 +184,40 @@ function MapPage() {
                 </div>
 
                 <div className="map-selected-content">
-
-                  <span>
-                    {selectedLocation.type}
-                  </span>
-
-                  <strong>
-                    {selectedLocation.name}
-                  </strong>
-
-                  <p>
-                    {selectedLocation.description}
-                  </p>
-
+                  <span>{selectedLocation.type || "Campus location"}</span>
+                  <strong>{selectedLocation.name}</strong>
+                  <dl className="map-selected-details">
+                    <div>
+                      <dt>Description</dt>
+                      <dd>{selectedLocation.description || "Unavailable in verified records."}</dd>
+                    </div>
+                    <div>
+                      <dt>Zone</dt>
+                      <dd>{selectedLocation.zone || "Unavailable in verified records."}</dd>
+                    </div>
+                    <div>
+                      <dt>Coordinates</dt>
+                      <dd>
+                        {hasValidCoordinates
+                          ? `${selectedLocation.latitude}, ${selectedLocation.longitude}`
+                          : "Coordinates unavailable"}
+                      </dd>
+                    </div>
+                  </dl>
+                  {selectedLocation.is_verified === true && selectedLocation.id && (
+                    <button
+                      type="button"
+                      className="map-selected-assistant"
+                      onClick={() => onAskAssistant?.(selectedLocation.id)}
+                    >
+                      Ask Campus Assistant
+                    </button>
+                  )}
                 </div>
 
                 <button
                   type="button"
-                  onClick={() => setSelectedLocation(null)}
+                  onClick={clearSelection}
                   aria-label="Close selected location"
                 >
                   ×
@@ -197,9 +243,20 @@ function MapPage() {
               <h2>Explore campus</h2>
             </div>
 
-            <span className="location-count">
-              {filteredLocations.length}
-            </span>
+            <div className="locations-header-actions">
+              {selectedLocation && (
+                <button
+                  type="button"
+                  className="clear-map-selection"
+                  onClick={clearSelection}
+                >
+                  Clear selection
+                </button>
+              )}
+              <span className="location-count" aria-label={`${filteredLocations.length} search results`}>
+                {filteredLocations.length}
+              </span>
+            </div>
 
           </div>
 
@@ -212,9 +269,8 @@ function MapPage() {
             <input
               type="text"
               value={search}
-              onChange={(event) =>
-                setSearch(event.target.value)
-              }
+              aria-label="Search verified campus buildings by name"
+              onChange={(event) => updateSearch(event.target.value)}
               placeholder="Search locations..."
             />
 
@@ -232,17 +288,25 @@ function MapPage() {
 
           {/* LOCATION LIST */}
 
-          <div className="location-list">
+          <div className="location-list" aria-live="polite">
+
+            {search && filteredLocations.length === 0 && (
+              <div className="location-search-empty">
+                No locations match “{search}”.
+              </div>
+            )}
 
             {filteredLocations.length > 0 ? (
               filteredLocations.map((location) => (
                 <button
                   type="button"
+                  ref={location.id === selectedLocation?.id ? selectedListItemRef : null}
                   className={`location-item ${
                     selectedLocation?.id === location.id
                       ? "selected"
                       : ""
                   }`}
+                  aria-pressed={selectedLocation?.id === location.id}
                   key={location.id}
                   onClick={() => selectLocation(location)}
                 >
@@ -265,6 +329,10 @@ function MapPage() {
                     </span>
 
                   </div>
+
+                  {selectedLocation?.id === location.id && (
+                    <span className="location-selected-label">Selected</span>
+                  )}
 
                   <span className="location-arrow">
                     →
@@ -318,8 +386,60 @@ function App() {
   const [search, setSearch] = useState("");
   const [selectedLocation, setSelectedLocation] = useState(null);
   const [activePage, setActivePage] = useState("home");
+  const [mapSelectionId, setMapSelectionId] = useState(null);
+  const [assistantBuildingId, setAssistantBuildingId] = useState(null);
+  const [campusLocations, setCampusLocations] = useState([]);
+  const [locationsLoading, setLocationsLoading] = useState(true);
+  const [locationsError, setLocationsError] = useState("");
 
-  const searchResults = campusData.filter((location) => {
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadCampusLocations = async () => {
+      try {
+        setLocationsLoading(true);
+        setLocationsError("");
+
+        const response = await fetch(`${API_BASE_URL}/api/buildings`, {
+          cache: "no-store",
+        });
+
+        if (!response.ok) {
+          throw new Error("Unable to load verified campus data.");
+        }
+
+        const result = await response.json();
+
+        if (!result.success || !Array.isArray(result.data)) {
+          throw new Error("Campus API returned an invalid response.");
+        }
+
+        if (!cancelled) {
+          setCampusLocations(result.data);
+        }
+      } catch (error) {
+        console.error("Campus locations error:", error);
+
+        if (!cancelled) {
+          setLocationsError(
+            "Verified campus data could not be loaded. Please make sure the backend is running."
+          );
+        }
+      } finally {
+        if (!cancelled) {
+          setLocationsLoading(false);
+        }
+      }
+    };
+
+    loadCampusLocations();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const searchResults = campusLocations.filter((location) => {
     const query = search.toLowerCase().trim();
 
     if (!query) return false;
@@ -393,9 +513,43 @@ function App() {
     setActivePage("map");
     setSearch("");
     setSelectedLocation(null);
+    setMapSelectionId(null);
+  };
+
+  const handleViewBuildingOnMap = (building) => {
+    if (building?.is_verified !== true || !building.id) return;
+
+    const campusBuilding = campusLocations.find((location) =>
+      location.id === building.id &&
+      location.is_verified === true
+    );
+    if (!campusBuilding) return;
+
+    setMapSelectionId(campusBuilding.id);
+    setSearch("");
+    setSelectedLocation(null);
+    setActivePage("map");
+  };
+
+  const canSelectBuildingOnMap = (building) =>
+    building?.is_verified === true &&
+    Boolean(building.id) &&
+    campusLocations.some((location) =>
+      location.id === building.id && location.is_verified === true
+    );
+
+  const openAssistantForBuilding = (buildingId) => {
+    const building = campusLocations.find((location) =>
+      location.id === buildingId && location.is_verified === true
+    );
+    if (!building) return;
+
+    setAssistantBuildingId(building.id);
+    setActivePage("ai");
   };
 
   const goAI = () => {
+    setAssistantBuildingId(null);
     setActivePage("ai");
     setSearch("");
     setSelectedLocation(null);
@@ -487,11 +641,25 @@ function App() {
 
       {activePage === "ai" ? (
 
-        <AIAssistant />
+        <AIAssistant
+          apiBaseUrl={API_BASE_URL}
+          onViewOnMap={handleViewBuildingOnMap}
+          canViewOnMap={canSelectBuildingOnMap}
+          selectedBuildingId={assistantBuildingId}
+          selectedBuildingName={campusLocations.find((location) =>
+            location.id === assistantBuildingId && location.is_verified === true
+          )?.name || ""}
+          onClearBuildingContext={() => setAssistantBuildingId(null)}
+        />
 
       ) : activePage === "map" ? (
 
-        <MapPage />
+        <MapPage
+          campusLocations={campusLocations}
+          selectedLocationId={mapSelectionId}
+          onClearSelection={() => setMapSelectionId(null)}
+          onAskAssistant={openAssistantForBuilding}
+        />
 
       ) : (
 
@@ -511,6 +679,20 @@ function App() {
             </div>
 
           </div>
+
+          {locationsLoading && (
+            <div className="map-trust-note" style={{ marginTop: "18px" }}>
+              <span>•</span>
+              <p>Loading verified campus data…</p>
+            </div>
+          )}
+
+          {locationsError && (
+            <div className="map-trust-note" style={{ marginTop: "18px" }}>
+              <span>!</span>
+              <p>{locationsError}</p>
+            </div>
+          )}
 
 
           {/* ================= HERO ================= */}
