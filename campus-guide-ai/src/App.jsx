@@ -18,6 +18,8 @@ function MapPage({ campusLocations, selectedLocationId, onClearSelection, onAskA
   const [zoom, setZoom] = useState(1);
   const [isMapInteracting, setIsMapInteracting] = useState(false);
   const [mapLayerSize, setMapLayerSize] = useState(null);
+  const [sheetPosition, setSheetPosition] = useState("collapsed");
+  const [isSheetDragging, setIsSheetDragging] = useState(false);
   const mapViewRef = useRef(null);
   const mapImageWrapperRef = useRef(null);
   const mapImageRef = useRef(null);
@@ -30,6 +32,9 @@ function MapPage({ campusLocations, selectedLocationId, onClearSelection, onAskA
   const suppressMapClickUntilRef = useRef(0);
   const zoomSyncTimerRef = useRef(null);
   const selectedListItemRef = useRef(null);
+  const locationSheetRef = useRef(null);
+  const sheetDragRef = useRef(null);
+  const suppressSheetClickRef = useRef(false);
 
   const verifiedCampusLocations = campusLocations.filter((location) =>
     location.is_verified === true
@@ -341,6 +346,75 @@ function MapPage({ campusLocations, selectedLocationId, onClearSelection, onAskA
   const selectLocation = (location) => {
     setListSelectedLocation(location);
     onClearSelection?.();
+    if (sheetPosition === "full" && window.matchMedia("(max-width: 600px)").matches) {
+      setSheetPosition("half");
+    }
+  };
+
+  const getSheetSnapHeights = () => {
+    const mapHeight = mapViewRef.current?.getBoundingClientRect().height || window.innerHeight;
+    return [176, mapHeight * 0.52, Math.max(240, mapHeight - 72)];
+  };
+
+  const handleSheetPointerDown = (event) => {
+    if (event.pointerType === "mouse" && event.button !== 0) return;
+    const sheet = locationSheetRef.current;
+    if (!sheet) return;
+
+    sheetDragRef.current = {
+      pointerId: event.pointerId,
+      startY: event.clientY,
+      startHeight: sheet.getBoundingClientRect().height,
+      moved: false,
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+    setIsSheetDragging(true);
+  };
+
+  const handleSheetPointerMove = (event) => {
+    const drag = sheetDragRef.current;
+    const sheet = locationSheetRef.current;
+    if (!drag || drag.pointerId !== event.pointerId || !sheet) return;
+
+    const deltaY = event.clientY - drag.startY;
+    if (Math.abs(deltaY) > 5) drag.moved = true;
+    if (!drag.moved) return;
+
+    const [collapsed, , expanded] = getSheetSnapHeights();
+    const height = Math.max(collapsed, Math.min(expanded, drag.startHeight - deltaY));
+    sheet.style.height = `${height}px`;
+    event.preventDefault();
+  };
+
+  const finishSheetPointer = (event) => {
+    const drag = sheetDragRef.current;
+    const sheet = locationSheetRef.current;
+    if (!drag || drag.pointerId !== event.pointerId || !sheet) return;
+
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    if (drag.moved) {
+      const height = sheet.getBoundingClientRect().height;
+      const snaps = getSheetSnapHeights();
+      const nearestIndex = snaps.reduce((closest, value, index) =>
+        Math.abs(value - height) < Math.abs(snaps[closest] - height) ? index : closest, 0
+      );
+      setSheetPosition(["collapsed", "half", "full"][nearestIndex]);
+      suppressSheetClickRef.current = true;
+      window.setTimeout(() => { suppressSheetClickRef.current = false; }, 250);
+    }
+
+    sheet.style.height = "";
+    sheetDragRef.current = null;
+    setIsSheetDragging(false);
+  };
+
+  const cycleSheetPosition = () => {
+    if (suppressSheetClickRef.current) return;
+    setSheetPosition((current) =>
+      current === "collapsed" ? "half" : current === "half" ? "full" : "collapsed"
+    );
   };
 
   const clearSelection = () => {
@@ -351,13 +425,16 @@ function MapPage({ campusLocations, selectedLocationId, onClearSelection, onAskA
   const updateSearch = (value) => {
     setSearch(value);
     const query = value.trim().toLowerCase();
+    if (query && sheetPosition === "collapsed" && window.matchMedia("(max-width: 600px)").matches) {
+      setSheetPosition("half");
+    }
     if (query && selectedLocation && !selectedLocation.name.toLowerCase().includes(query)) {
       clearSelection();
     }
   };
 
   return (
-    <main className="map-page">
+    <main className={`map-page map-sheet-${sheetPosition}`}>
       {/* ================= MAP HEADER ================= */}
 
       <div className="map-page-header">
@@ -530,7 +607,23 @@ function MapPage({ campusLocations, selectedLocationId, onClearSelection, onAskA
 
         {/* ================= LOCATIONS PANEL ================= */}
 
-        <aside className="locations-card">
+        <aside
+          ref={locationSheetRef}
+          className={`locations-card location-sheet sheet-${sheetPosition} ${isSheetDragging ? "is-sheet-dragging" : ""}`}
+        >
+
+          <button
+            type="button"
+            className="location-sheet-handle"
+            aria-label={`Locations panel is ${sheetPosition}. Tap to change position or drag to resize.`}
+            onPointerDown={handleSheetPointerDown}
+            onPointerMove={handleSheetPointerMove}
+            onPointerUp={finishSheetPointer}
+            onPointerCancel={finishSheetPointer}
+            onClick={cycleSheetPosition}
+          >
+            <span aria-hidden="true" />
+          </button>
 
           <div className="locations-header">
 

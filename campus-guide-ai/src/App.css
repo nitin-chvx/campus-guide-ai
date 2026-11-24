@@ -6700,3 +6700,220 @@
     padding-bottom: calc(118px + env(safe-area-inset-bottom, 0px));
   }
 }
+
+.location-sheet-handle {
+  display: none;
+}
+
+/* Mobile map canvas and draggable locations sheet; desktop map layout stays intact. */
+@media (max-width: 600px) {
+  .map-page {
+    position: fixed;
+    z-index: 50;
+    inset: 64px 0 calc(84px + env(safe-area-inset-bottom, 0px));
+    width: 100%;
+    height: auto;
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+    overscroll-behavior: none;
+    background: #e7eadf;
+  }
+
+  .map-page-header {
+    display: none;
+  }
+
+  .map-layout {
+    position: relative;
+    display: block !important;
+    width: 100%;
+    height: 100%;
+    min-height: 0;
+    margin: 0;
+    overflow: hidden;
+  }
+
+  .map-card {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    min-height: 0;
+    overflow: hidden;
+    border: 0 !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+  }
+
+  .map-card-header {
+    display: none;
+  }
+
+  .map-view {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100% !important;
+    min-height: 0 !important;
+    overflow: hidden;
+    touch-action: none;
+  }
+
+  .map-image-wrapper {
+    touch-action: none;
+  }
+
+  .map-controls {
+    position: absolute;
+    top: 8px;
+    right: 12px;
+    z-index: 250;
+    flex-direction: row;
+    gap: 6px;
+    padding: 5px;
+    border: 1px solid rgba(220, 228, 239, 0.9);
+    border-radius: 15px;
+    background: rgba(255, 255, 255, 0.93);
+    box-shadow: 0 7px 18px rgba(18, 33, 58, 0.16);
+    backdrop-filter: blur(10px);
+  }
+
+  .map-controls button {
+    width: 38px !important;
+    height: 38px !important;
+    margin: 0 !important;
+    border-radius: 11px !important;
+  }
+
+  .locations-card.location-sheet {
+    position: absolute !important;
+    z-index: 200;
+    inset: auto 8px 8px;
+    display: flex;
+    width: auto;
+    height: 176px !important;
+    max-height: calc(100% - 16px);
+    min-height: 0 !important;
+    flex-direction: column;
+    overflow: hidden;
+    border: 1px solid rgba(222, 229, 238, 0.96) !important;
+    border-radius: 20px !important;
+    background: rgba(255, 255, 255, 0.98) !important;
+    box-shadow: 0 12px 36px rgba(18, 33, 58, 0.2) !important;
+    transition: height 240ms cubic-bezier(0.2, 0.75, 0.25, 1);
+    overscroll-behavior: contain;
+  }
+
+  .locations-card.location-sheet.sheet-half {
+    height: 52% !important;
+  }
+
+  .locations-card.location-sheet.sheet-full {
+    height: calc(100% - 72px) !important;
+  }
+
+  .locations-card.location-sheet.is-sheet-dragging {
+    transition: none;
+    user-select: none;
+  }
+
+  .location-sheet-handle {
+    display: grid;
+    flex: 0 0 28px;
+    width: 100%;
+    place-items: center;
+    border: 0;
+    background: transparent;
+    touch-action: none;
+    cursor: grab;
+  }
+
+  .location-sheet-handle:active {
+    cursor: grabbing;
+  }
+
+  .location-sheet-handle span {
+    display: block;
+    width: 38px;
+    height: 4px;
+    border-radius: 99px;
+    background: #cbd5e1;
+  }
+
+  .location-sheet .locations-header {
+    flex: 0 0 auto;
+    padding: 7px 14px 10px !important;
+  }
+
+  .location-sheet .locations-header h2 {
+    font-size: 17px !important;
+  }
+
+  .location-sheet .location-count {
+    min-width: 28px;
+    height: 28px;
+  }
+
+  .location-sheet .location-search {
+    flex: 0 0 42px;
+    height: 42px !important;
+    margin: 0 12px 9px !important;
+  }
+
+  .location-sheet .location-list {
+    display: block;
+    flex: 1 1 auto;
+    min-height: 0;
+    padding: 4px 10px 8px !important;
+    overflow-x: hidden !important;
+    overflow-y: auto !important;
+    overscroll-behavior: contain;
+    touch-action: pan-y;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .location-sheet.sheet-collapsed .location-list,
+  .location-sheet .map-trust-note {
+    display: none !important;
+  }
+
+  .location-sheet.sheet-collapsed .locations-header {
+    padding-top: 2px !important;
+    padding-bottom: 8px !important;
+  }
+
+  .location-sheet .location-item {
+    min-height: 58px;
+  }
+
+  .map-selected-card {
+    position: absolute !important;
+    z-index: 30;
+    right: 62px;
+    bottom: calc(var(--locations-sheet-height, 176px) + 18px);
+    left: 12px;
+    max-height: min(42%, 230px) !important;
+    margin: 0 !important;
+    overflow: auto !important;
+    border-radius: 15px;
+    background: rgba(255, 255, 255, 0.96) !important;
+    box-shadow: 0 8px 24px rgba(18, 33, 58, 0.18);
+    overscroll-behavior: contain;
+  }
+
+  .map-page.map-sheet-collapsed {
+    --locations-sheet-height: 176px;
+  }
+
+  .map-page.map-sheet-half {
+    --locations-sheet-height: 52%;
+  }
+
+  .map-page.map-sheet-full {
+    --locations-sheet-height: calc(100% - 72px);
+  }
+
+  .map-page.map-sheet-full .map-selected-card {
+    display: none;
+  }
+}
