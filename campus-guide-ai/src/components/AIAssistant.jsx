@@ -11,7 +11,7 @@ function AIAssistant({
   const [message, setMessage] = useState("");
   const [isTyping, setIsTyping] = useState(false);
 
-  const messagesEndRef = useRef(null);
+  const chatMessagesRef = useRef(null);
   const requestInFlightRef = useRef(false);
 
   const [messages, setMessages] = useState([
@@ -26,9 +26,17 @@ function AIAssistant({
   // =========================================================
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({
-      behavior: "smooth",
+    const chatMessages = chatMessagesRef.current;
+    if (!chatMessages) return undefined;
+
+    const frame = window.requestAnimationFrame(() => {
+      chatMessages.scrollTo({
+        top: chatMessages.scrollHeight,
+        behavior: "smooth",
+      });
     });
+
+    return () => window.cancelAnimationFrame(frame);
   }, [messages, isTyping]);
 
 
@@ -265,7 +273,7 @@ function AIAssistant({
             MESSAGES
             =================================================== */}
 
-        <div className="chat-messages">
+        <div className="chat-messages" ref={chatMessagesRef}>
 
           {messages.map((msg, index) => (
 
@@ -411,8 +419,6 @@ function AIAssistant({
 
           )}
 
-          <div ref={messagesEndRef}></div>
-
         </div>
 
 
@@ -424,8 +430,8 @@ function AIAssistant({
 
           <div className="chat-input-wrapper">
 
-            <input
-              type="text"
+            <textarea
+              rows={1}
               placeholder="Ask about your campus..."
               value={message}
               onChange={(e) =>
@@ -433,6 +439,7 @@ function AIAssistant({
               }
               onKeyDown={handleKeyDown}
               disabled={isTyping}
+              aria-label="Ask the Campus Assistant"
             />
 
 

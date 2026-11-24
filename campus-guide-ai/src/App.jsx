@@ -1,8 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import "./App.css";
 import AIAssistant from "./components/AIAssistant";
+import Schedule from "./components/Schedule";
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
+const MIN_MAP_SCALE = 1;
+const MAX_MAP_SCALE = 3.2;
 
 /* =========================================================
    MAP PAGE
@@ -12,6 +15,19 @@ function MapPage({ campusLocations, selectedLocationId, onClearSelection, onAskA
   const [search, setSearch] = useState("");
   const [listSelectedLocation, setListSelectedLocation] = useState(null);
   const [zoom, setZoom] = useState(1);
+  const [isMapInteracting, setIsMapInteracting] = useState(false);
+  const [mapLayerSize, setMapLayerSize] = useState(null);
+  const mapViewRef = useRef(null);
+  const mapImageWrapperRef = useRef(null);
+  const mapImageRef = useRef(null);
+  const pointerPositionsRef = useRef(new Map());
+  const pointerCaptureTargetsRef = useRef(new Map());
+  const gestureRef = useRef(null);
+  const mapTransformRef = useRef({ x: 0, y: 0, scale: 1 });
+  const mapWheelHandlerRef = useRef(null);
+  const mapMovedRef = useRef(false);
+  const suppressMapClickUntilRef = useRef(0);
+  const zoomSyncTimerRef = useRef(null);
   const selectedListItemRef = useRef(null);
 
   const verifiedCampusLocations = campusLocations.filter((location) =>
@@ -28,6 +44,44 @@ function MapPage({ campusLocations, selectedLocationId, onClearSelection, onAskA
       block: "nearest",
     });
   }, [selectedLocation?.id, search]);
+
+  useEffect(() => {
+    const viewport = mapViewRef.current;
+    if (!viewport) return undefined;
+
+    const measureLayer = () => {
+      const image = mapImageRef.current;
+      if (!image) return;
+      const { width, height } = viewport.getBoundingClientRect();
+      if (!width || !height) return;
+
+      const naturalWidth = image.naturalWidth || width;
+      const naturalHeight = image.naturalHeight || height;
+      const coverScale = Math.max(width / naturalWidth, height / naturalHeight);
+      const layerWidth = naturalWidth * coverScale;
+      const layerHeight = naturalHeight * coverScale;
+      setMapLayerSize({ width: layerWidth, height: layerHeight });
+
+      const current = mapTransformRef.current;
+      const maxX = Math.max(0, (layerWidth * current.scale - width) / 2);
+      const maxY = Math.max(0, (layerHeight * current.scale - height) / 2);
+      mapTransformRef.current = {
+        ...current,
+        x: Math.min(maxX, Math.max(-maxX, current.x)),
+        y: Math.min(maxY, Math.max(-maxY, current.y)),
+      };
+    };
+
+    const observer = new ResizeObserver(measureLayer);
+    observer.observe(viewport);
+    mapImageRef.current?.addEventListener("load", measureLayer);
+    measureLayer();
+
+    return () => {
+      observer.disconnect();
+      mapImageRef.current?.removeEventListener("load", measureLayer);
+    };
+  }, []);
 
   const getLocationIcon = (type) => {
     if (type === "Library") return "L";
@@ -54,16 +108,233 @@ function MapPage({ campusLocations, selectedLocationId, onClearSelection, onAskA
     selectedLocation.longitude <= 180
   );
 
+  const clampMapTransform = (transform) => {
+    const viewport = mapViewRef.current;
+    if (!viewport) return transform;
+
+    const { width, height } = viewport.getBoundingClientRect();
+    const image = mapImageRef.current;
+    const naturalWidth = image?.naturalWidth || width;
+    const naturalHeight = image?.naturalHeight || height;
+    const fitScale = Math.max(width / naturalWidth, height / naturalHeight);
+    const imageWidth = naturalWidth * fitScale;
+    const imageHeight = naturalHeight * fitScale;
+    const maxX = Math.max(0, (imageWidth * transform.scale - width) / 2);
+    const maxY = Math.max(0, (imageHeight * transform.scale - height) / 2);
+
+    return {
+      scale: Math.min(MAX_MAP_SCALE, Math.max(MIN_MAP_SCALE, transform.scale)),
+      x: Math.min(maxX, Math.max(-maxX, transform.x)),
+      y: Math.min(maxY, Math.max(-maxY, transform.y)),
+    };
+  };
+
+  const applyMapTransform = (transform, syncZoom = false) => {
+    const next = clampMapTransform(transform);
+    mapTransformRef.current = next;
+    if (mapImageWrapperRef.current) {
+      mapImageWrapperRef.current.style.transform =
+        `translate3d(${next.x}px, ${next.y}px, 0) scale(${next.scale})`;
+    }
+    if (syncZoom) setZoom(next.scale);
+    return next;
+  };
+
+  const zoomAtPoint = (requestedScale, clientX, clientY, syncZoom = true) => {
+    const viewport = mapViewRef.current;
+    if (!viewport) return;
+
+    const rect = viewport.getBoundingClientRect();
+    const pointX = clientX - rect.left - rect.width / 2;
+    const pointY = clientY - rect.top - rect.height / 2;
+    const current = mapTransformRef.current;
+    const nextScale = Math.min(MAX_MAP_SCALE, Math.max(MIN_MAP_SCALE, requestedScale));
+    const mapPointX = (pointX - current.x) / current.scale;
+    const mapPointY = (pointY - current.y) / current.scale;
+
+    applyMapTransform({
+      scale: nextScale,
+      x: pointX - mapPointX * nextScale,
+      y: pointY - mapPointY * nextScale,
+    }, syncZoom);
+  };
+
   const zoomIn = () => {
-    setZoom((previous) => Math.min(previous + 0.2, 2));
+    const viewport = mapViewRef.current;
+    if (!viewport) return;
+    const rect = viewport.getBoundingClientRect();
+    zoomAtPoint(mapTransformRef.current.scale * 1.2, rect.left + rect.width / 2, rect.top + rect.height / 2);
   };
 
   const zoomOut = () => {
-    setZoom((previous) => Math.max(previous - 0.2, 0.7));
+    const viewport = mapViewRef.current;
+    if (!viewport) return;
+    const rect = viewport.getBoundingClientRect();
+    zoomAtPoint(mapTransformRef.current.scale / 1.2, rect.left + rect.width / 2, rect.top + rect.height / 2);
   };
 
   const resetZoom = () => {
-    setZoom(1);
+    applyMapTransform({ x: 0, y: 0, scale: 1 }, true);
+  };
+
+  const handleMapPointerDown = (event) => {
+    if (event.pointerType === "mouse" && event.button !== 0) return;
+    if (event.target.closest(".map-controls, .map-selected-card")) return;
+
+    const pointers = pointerPositionsRef.current;
+    if (pointers.size >= 2) return;
+    if (pointers.size === 0) {
+      mapMovedRef.current = false;
+      suppressMapClickUntilRef.current = 0;
+    }
+
+    pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    const captureTarget = event.target;
+    if (captureTarget.setPointerCapture) {
+      captureTarget.setPointerCapture(event.pointerId);
+      pointerCaptureTargetsRef.current.set(event.pointerId, captureTarget);
+    }
+
+    if (pointers.size === 1) {
+      gestureRef.current = {
+        type: "pan",
+        startX: event.clientX,
+        startY: event.clientY,
+        origin: mapTransformRef.current,
+      };
+    } else {
+      const [first, second] = [...pointers.values()];
+      gestureRef.current = {
+        type: "pinch",
+        startDistance: Math.hypot(second.x - first.x, second.y - first.y),
+        startScale: mapTransformRef.current.scale,
+        origin: mapTransformRef.current,
+      };
+    }
+
+    setIsMapInteracting(true);
+  };
+
+  const handleMapPointerMove = (event) => {
+    const pointers = pointerPositionsRef.current;
+    if (!pointers.has(event.pointerId)) return;
+
+    const previous = pointers.get(event.pointerId);
+    pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    const gesture = gestureRef.current;
+    if (!gesture) return;
+
+    if (pointers.size >= 2) {
+      const [first, second] = [...pointers.values()];
+      const distance = Math.hypot(second.x - first.x, second.y - first.y);
+      const centerX = (first.x + second.x) / 2;
+      const centerY = (first.y + second.y) / 2;
+      const viewport = mapViewRef.current;
+      if (!viewport || !gesture.startDistance) return;
+
+      const rect = viewport.getBoundingClientRect();
+      const pointX = centerX - rect.left - rect.width / 2;
+      const pointY = centerY - rect.top - rect.height / 2;
+      const scale = Math.min(MAX_MAP_SCALE, Math.max(
+        MIN_MAP_SCALE,
+        gesture.startScale * (distance / gesture.startDistance)
+      ));
+      const mapPointX = (pointX - gesture.origin.x) / gesture.startScale;
+      const mapPointY = (pointY - gesture.origin.y) / gesture.startScale;
+
+      if (Math.abs(scale - gesture.startScale) > 0.01 || Math.abs(centerX - previous.x) > 3) {
+        mapMovedRef.current = true;
+      }
+      applyMapTransform({
+        scale,
+        x: pointX - mapPointX * scale,
+        y: pointY - mapPointY * scale,
+      });
+      event.preventDefault();
+      return;
+    }
+
+    const deltaX = event.clientX - gesture.startX;
+    const deltaY = event.clientY - gesture.startY;
+    if (Math.hypot(deltaX, deltaY) > 4) mapMovedRef.current = true;
+    if (mapMovedRef.current) {
+      applyMapTransform({
+        ...gesture.origin,
+        x: gesture.origin.x + deltaX,
+        y: gesture.origin.y + deltaY,
+      });
+      event.preventDefault();
+    }
+  };
+
+  const finishMapPointer = (event) => {
+    const pointers = pointerPositionsRef.current;
+    if (!pointers.has(event.pointerId)) return;
+    pointers.delete(event.pointerId);
+
+    const captureTarget = pointerCaptureTargetsRef.current.get(event.pointerId);
+    if (captureTarget?.hasPointerCapture?.(event.pointerId)) {
+      captureTarget.releasePointerCapture(event.pointerId);
+    }
+    pointerCaptureTargetsRef.current.delete(event.pointerId);
+
+    if (pointers.size === 1) {
+      const [remainingId, point] = [...pointers.entries()][0];
+      gestureRef.current = {
+        type: "pan",
+        pointerId: remainingId,
+        startX: point.x,
+        startY: point.y,
+        origin: mapTransformRef.current,
+      };
+      return;
+    }
+
+    gestureRef.current = null;
+    setIsMapInteracting(false);
+    setZoom(mapTransformRef.current.scale);
+    if (mapMovedRef.current) {
+      suppressMapClickUntilRef.current = Date.now() + 200;
+    }
+  };
+
+  const handleMapWheel = (event) => {
+    if (event.target.closest(".map-controls, .map-selected-card")) return;
+    event.preventDefault();
+    const viewport = mapViewRef.current;
+    if (!viewport) return;
+
+    const rect = viewport.getBoundingClientRect();
+    const delta = event.deltaMode === 1
+      ? event.deltaY * 16
+      : event.deltaMode === 2
+        ? event.deltaY * rect.height
+        : event.deltaY;
+    const current = mapTransformRef.current;
+    zoomAtPoint(current.scale * Math.exp(-delta * 0.0012), event.clientX, event.clientY, false);
+    window.clearTimeout(zoomSyncTimerRef.current);
+    zoomSyncTimerRef.current = window.setTimeout(() => {
+      setZoom(mapTransformRef.current.scale);
+    }, 120);
+  };
+
+  mapWheelHandlerRef.current = handleMapWheel;
+
+  useEffect(() => {
+    const viewport = mapViewRef.current;
+    if (!viewport) return undefined;
+
+    const wheelListener = (event) => mapWheelHandlerRef.current?.(event);
+    viewport.addEventListener("wheel", wheelListener, { passive: false });
+    return () => viewport.removeEventListener("wheel", wheelListener);
+  }, []);
+
+  const handleMapClickCapture = (event) => {
+    if (Date.now() < suppressMapClickUntilRef.current) {
+      event.preventDefault();
+      event.stopPropagation();
+      suppressMapClickUntilRef.current = 0;
+    }
   };
 
   const selectLocation = (location) => {
@@ -131,16 +402,36 @@ function MapPage({ campusLocations, selectedLocationId, onClearSelection, onAskA
 
           {/* ================= MAP VIEW ================= */}
 
-          <div className="map-view">
+          <div
+            ref={mapViewRef}
+            className={`map-view ${isMapInteracting ? "is-interacting" : ""}`}
+            onPointerDown={handleMapPointerDown}
+            onPointerMove={handleMapPointerMove}
+            onPointerUp={finishMapPointer}
+            onPointerCancel={finishMapPointer}
+            onClickCapture={handleMapClickCapture}
+          >
 
-            <div className="map-image-wrapper">
+            <div
+              ref={mapImageWrapperRef}
+              className="map-image-wrapper"
+              style={{
+                position: "absolute",
+                left: "50%",
+                top: "50%",
+                width: mapLayerSize ? `${mapLayerSize.width}px` : "100%",
+                height: mapLayerSize ? `${mapLayerSize.height}px` : "100%",
+                marginLeft: mapLayerSize ? `${-mapLayerSize.width / 2}px` : "-50%",
+                marginTop: mapLayerSize ? `${-mapLayerSize.height / 2}px` : "-50%",
+                transform: `translate3d(${mapTransformRef.current.x}px, ${mapTransformRef.current.y}px, 0) scale(${mapTransformRef.current.scale})`,
+              }}
+            >
               <img
+                ref={mapImageRef}
                 src="/mangalayatan-campus-map.jpg"
                 alt="Mangalayatan University campus map"
                 className="campus-map-image"
-                style={{
-                  transform: `scale(${zoom})`,
-                }}
+                draggable={false}
               />
             </div>
 
@@ -151,7 +442,9 @@ function MapPage({ campusLocations, selectedLocationId, onClearSelection, onAskA
               <button
                 type="button"
                 onClick={zoomIn}
+                disabled={zoom >= MAX_MAP_SCALE}
                 aria-label="Zoom in"
+                title="Zoom in"
               >
                 +
               </button>
@@ -159,7 +452,9 @@ function MapPage({ campusLocations, selectedLocationId, onClearSelection, onAskA
               <button
                 type="button"
                 onClick={zoomOut}
+                disabled={zoom <= MIN_MAP_SCALE}
                 aria-label="Zoom out"
+                title="Zoom out"
               >
                 −
               </button>
@@ -167,13 +462,18 @@ function MapPage({ campusLocations, selectedLocationId, onClearSelection, onAskA
               <button
                 type="button"
                 onClick={resetZoom}
-                aria-label="Reset map zoom"
+                aria-label="Reset map view"
+                title="Reset map view"
               >
                 ↺
               </button>
 
             </div>
 
+
+          </div>
+
+          {/* Selected building details are kept below the image canvas. */}
             {/* SELECTED LOCATION INFORMATION */}
 
             {selectedLocation && (
@@ -225,8 +525,6 @@ function MapPage({ campusLocations, selectedLocationId, onClearSelection, onAskA
 
               </div>
             )}
-
-          </div>
         </div>
 
         {/* ================= LOCATIONS PANEL ================= */}
@@ -503,13 +801,19 @@ function App() {
     setSelectedLocation(null);
   };
 
+  const scrollToPageTop = () => {
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
   const goHome = () => {
+    scrollToPageTop();
     setActivePage("home");
     setSearch("");
     setSelectedLocation(null);
   };
 
   const goMap = () => {
+    scrollToPageTop();
     setActivePage("map");
     setSearch("");
     setSelectedLocation(null);
@@ -528,6 +832,7 @@ function App() {
     setMapSelectionId(campusBuilding.id);
     setSearch("");
     setSelectedLocation(null);
+    scrollToPageTop();
     setActivePage("map");
   };
 
@@ -545,12 +850,21 @@ function App() {
     if (!building) return;
 
     setAssistantBuildingId(building.id);
+    scrollToPageTop();
     setActivePage("ai");
   };
 
   const goAI = () => {
+    scrollToPageTop();
     setAssistantBuildingId(null);
     setActivePage("ai");
+    setSearch("");
+    setSelectedLocation(null);
+  };
+
+  const goSchedule = () => {
+    scrollToPageTop();
+    setActivePage("schedule");
     setSearch("");
     setSelectedLocation(null);
   };
@@ -611,13 +925,9 @@ function App() {
           </button>
 
           <button
-            className="nav-link"
+            className={`nav-link ${activePage === "schedule" ? "active" : ""}`}
             type="button"
-            onClick={() => {
-              alert(
-                "Schedule will be connected after the map and AI systems are complete."
-              );
-            }}
+            onClick={goSchedule}
           >
             Schedule
           </button>
@@ -650,6 +960,15 @@ function App() {
             location.id === assistantBuildingId && location.is_verified === true
           )?.name || ""}
           onClearBuildingContext={() => setAssistantBuildingId(null)}
+        />
+
+      ) : activePage === "schedule" ? (
+
+        <Schedule
+          campusLocations={campusLocations}
+          locationsLoading={locationsLoading}
+          locationsError={locationsError}
+          onViewOnMap={handleViewBuildingOnMap}
         />
 
       ) : activePage === "map" ? (
@@ -997,11 +1316,7 @@ function App() {
                   <button
                     className="schedule-link"
                     type="button"
-                    onClick={() => {
-                      alert(
-                        "Schedule will be connected in the next development phase."
-                      );
-                    }}
+                    onClick={goSchedule}
                   >
                     View schedule →
                   </button>
@@ -1142,13 +1457,9 @@ function App() {
         </button>
 
         <button
-          className="mobile-nav-item"
+          className={`mobile-nav-item ${activePage === "schedule" ? "active" : ""}`}
           type="button"
-          onClick={() => {
-            alert(
-              "Schedule will be connected in the next development phase."
-            );
-          }}
+          onClick={goSchedule}
         >
           <span>▣</span>
           <small>Schedule</small>
