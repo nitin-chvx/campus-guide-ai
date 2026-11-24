@@ -20,6 +20,7 @@ function MapPage({ campusLocations, selectedLocationId, onClearSelection, onAskA
   const [mapLayerSize, setMapLayerSize] = useState(null);
   const [sheetPosition, setSheetPosition] = useState("collapsed");
   const [isSheetDragging, setIsSheetDragging] = useState(false);
+  const [showSheetHintBounce, setShowSheetHintBounce] = useState(false);
   const mapViewRef = useRef(null);
   const mapImageWrapperRef = useRef(null);
   const mapImageRef = useRef(null);
@@ -35,6 +36,20 @@ function MapPage({ campusLocations, selectedLocationId, onClearSelection, onAskA
   const locationSheetRef = useRef(null);
   const sheetDragRef = useRef(null);
   const suppressSheetClickRef = useRef(false);
+
+  useEffect(() => {
+    if (!window.matchMedia("(max-width: 600px)").matches) return;
+    try {
+      const hintShown = window.localStorage.getItem("campus-map-sheet-hint-shown");
+      if (!hintShown) {
+        setShowSheetHintBounce(true);
+        window.localStorage.setItem("campus-map-sheet-hint-shown", "true");
+        window.setTimeout(() => setShowSheetHintBounce(false), 900);
+      }
+    } catch {
+      // Keep the map usable if browser storage is unavailable.
+    }
+  }, []);
 
   const verifiedCampusLocations = campusLocations.filter((location) =>
     location.is_verified === true
@@ -625,7 +640,7 @@ function MapPage({ campusLocations, selectedLocationId, onClearSelection, onAskA
 
           <button
             type="button"
-            className="location-sheet-handle"
+            className={`location-sheet-handle ${showSheetHintBounce ? "has-first-visit-bounce" : ""}`}
             aria-label={`Locations panel is ${sheetPosition}. Tap to change position or drag to resize.`}
             onPointerDown={handleSheetPointerDown}
             onPointerMove={handleSheetPointerMove}
@@ -634,7 +649,17 @@ function MapPage({ campusLocations, selectedLocationId, onClearSelection, onAskA
             onLostPointerCapture={finishSheetPointer}
             onClick={cycleSheetPosition}
           >
-            <span aria-hidden="true" />
+            <span className="location-sheet-grip" aria-hidden="true" />
+            <span className="location-sheet-cue">
+              <span className="location-sheet-chevron" aria-hidden="true" />
+              <span>
+                {sheetPosition === "collapsed"
+                  ? "Swipe up to explore locations"
+                  : sheetPosition === "half"
+                    ? `Explore campus · ${verifiedCampusLocations.length} locations`
+                    : ""}
+              </span>
+            </span>
           </button>
 
           <div className="locations-header">
