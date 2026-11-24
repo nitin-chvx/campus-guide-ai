@@ -6815,6 +6815,7 @@
   .locations-card.location-sheet.is-sheet-dragging {
     transition: none;
     user-select: none;
+    -webkit-user-select: none;
   }
 
   .location-sheet-handle {
@@ -6824,7 +6825,10 @@
     place-items: center;
     border: 0;
     background: transparent;
-    touch-action: none;
+    touch-action: none !important;
+    -webkit-user-select: none;
+    user-select: none;
+    pointer-events: auto;
     cursor: grab;
   }
 

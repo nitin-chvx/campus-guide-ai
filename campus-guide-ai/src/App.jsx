@@ -367,7 +367,10 @@ function MapPage({ campusLocations, selectedLocationId, onClearSelection, onAskA
       startHeight: sheet.getBoundingClientRect().height,
       moved: false,
     };
+    // Keep receiving movement when the finger leaves the narrow handle.
     event.currentTarget.setPointerCapture(event.pointerId);
+    event.preventDefault();
+    event.stopPropagation();
     setIsSheetDragging(true);
   };
 
@@ -382,8 +385,10 @@ function MapPage({ campusLocations, selectedLocationId, onClearSelection, onAskA
 
     const [collapsed, , expanded] = getSheetSnapHeights();
     const height = Math.max(collapsed, Math.min(expanded, drag.startHeight - deltaY));
-    sheet.style.height = `${height}px`;
+    // Snap heights are CSS !important rules, so drag height must also be important.
+    sheet.style.setProperty("height", `${height}px`, "important");
     event.preventDefault();
+    event.stopPropagation();
   };
 
   const finishSheetPointer = (event) => {
@@ -405,7 +410,13 @@ function MapPage({ campusLocations, selectedLocationId, onClearSelection, onAskA
       window.setTimeout(() => { suppressSheetClickRef.current = false; }, 250);
     }
 
-    sheet.style.height = "";
+    if (drag.moved) {
+      window.requestAnimationFrame(() => {
+        sheet.style.removeProperty("height");
+      });
+    } else {
+      sheet.style.removeProperty("height");
+    }
     sheetDragRef.current = null;
     setIsSheetDragging(false);
   };
@@ -620,6 +631,7 @@ function MapPage({ campusLocations, selectedLocationId, onClearSelection, onAskA
             onPointerMove={handleSheetPointerMove}
             onPointerUp={finishSheetPointer}
             onPointerCancel={finishSheetPointer}
+            onLostPointerCapture={finishSheetPointer}
             onClick={cycleSheetPosition}
           >
             <span aria-hidden="true" />
