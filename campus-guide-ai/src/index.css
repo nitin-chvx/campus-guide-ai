@@ -1694,3 +1694,65 @@ input:focus-visible {
   }
 
 }
+
+/* Home's schedule card reflects the same personal entries as Schedule. */
+.class-card-empty {
+  min-height: 112px;
+  background: linear-gradient(120deg, #fff, #f8fbff);
+}
+
+.class-empty-icon {
+  display: grid;
+  flex: 0 0 42px;
+  width: 42px;
+  height: 42px;
+  place-items: center;
+  border-radius: 13px;
+  background: #eff6ff;
+  color: var(--blue);
+  font-size: 19px;
+}
+
+@media (max-width: 600px) {
+  .app {
+    padding-bottom: calc(88px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .topbar {
+    box-sizing: border-box;
+    width: 100%;
+    min-width: 0;
+    gap: 12px;
+    padding-inline: max(14px, env(safe-area-inset-left, 0px)) max(14px, env(safe-area-inset-right, 0px));
+  }
+
+  .brand {
+    min-width: 0;
+    flex: 1 1 auto;
+    overflow: hidden;
+  }
+
+  .brand-icon {
+    flex: 0 0 38px;
+  }
+
+  .brand-name {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .profile-button {
+    flex: 0 0 36px;
+    margin-left: auto;
+  }
+
+  .mobile-nav {
+    bottom: calc(10px + env(safe-area-inset-bottom, 0px));
+    width: min(440px, calc(100% - 32px - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px)));
+    height: 64px;
+    padding: 5px;
+    z-index: 300;
+  }
+}

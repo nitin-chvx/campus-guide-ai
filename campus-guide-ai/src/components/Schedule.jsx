@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { SCHEDULE_STORAGE_KEY } from "../data/scheduleStorage";
 
-const STORAGE_KEY = "campus-guide-ai.schedule.v1";
 const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 const EMPTY_FORM = {
   subject: "",
@@ -39,7 +39,7 @@ function Schedule({ campusLocations, locationsLoading, locationsError, onViewOnM
 
   useEffect(() => {
     try {
-      const saved = window.localStorage.getItem(STORAGE_KEY);
+      const saved = window.localStorage.getItem(SCHEDULE_STORAGE_KEY);
       if (saved) {
         const parsed = JSON.parse(saved);
         if (!Array.isArray(parsed)) throw new Error("Invalid saved schedule.");
@@ -79,7 +79,7 @@ function Schedule({ campusLocations, locationsLoading, locationsError, onViewOnM
 
   const persistClasses = (nextClasses) => {
     try {
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(nextClasses));
+      window.localStorage.setItem(SCHEDULE_STORAGE_KEY, JSON.stringify(nextClasses));
       setClasses(nextClasses);
       setStorageError("");
       return true;

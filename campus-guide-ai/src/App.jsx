@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import "./App.css";
 import AIAssistant from "./components/AIAssistant";
 import Schedule from "./components/Schedule";
+import { formatScheduleTime, readScheduleEntries } from "./data/scheduleStorage";
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
 const MIN_MAP_SCALE = 1;
@@ -689,6 +690,43 @@ function App() {
   const [campusLocations, setCampusLocations] = useState([]);
   const [locationsLoading, setLocationsLoading] = useState(true);
   const [locationsError, setLocationsError] = useState("");
+  const [homeScheduleEntries, setHomeScheduleEntries] = useState(readScheduleEntries);
+  const [scheduleClock, setScheduleClock] = useState(() => new Date());
+
+  useEffect(() => {
+    if (activePage === "home") {
+      setHomeScheduleEntries(readScheduleEntries());
+    }
+  }, [activePage]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setScheduleClock(new Date()), 30_000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  const todayName = scheduleClock.toLocaleDateString("en-US", { weekday: "long" });
+  const currentMinutes = scheduleClock.getHours() * 60 + scheduleClock.getMinutes();
+  const todayScheduleEntries = homeScheduleEntries
+    .filter((entry) => entry.day === todayName)
+    .sort((a, b) => a.startTime.localeCompare(b.startTime));
+  const homeNextClass = todayScheduleEntries.find((entry) => {
+    const [endHour, endMinute] = entry.endTime.split(":").map(Number);
+    return endHour * 60 + endMinute > currentMinutes;
+  });
+  const isHomeClassInProgress = homeNextClass
+    ? (() => {
+        const [startHour, startMinute] = homeNextClass.startTime.split(":").map(Number);
+        const [endHour, endMinute] = homeNextClass.endTime.split(":").map(Number);
+        const start = startHour * 60 + startMinute;
+        const end = endHour * 60 + endMinute;
+        return start <= currentMinutes && currentMinutes < end;
+      })()
+    : false;
+  const homeClassBuilding = homeNextClass?.buildingId
+    ? campusLocations.find((location) =>
+        location.id === homeNextClass.buildingId && location.is_verified === true
+      )
+    : null;
 
   useEffect(() => {
     let cancelled = false;
@@ -807,6 +845,7 @@ function App() {
 
   const goHome = () => {
     scrollToPageTop();
+    setHomeScheduleEntries(readScheduleEntries());
     setActivePage("home");
     setSearch("");
     setSelectedLocation(null);
@@ -1324,50 +1363,43 @@ function App() {
                 </div>
 
 
-                <div className="class-card">
-
-                  <div className="class-time">
-
-                    <strong>
-                      10:00
-                    </strong>
-
-                    <span>
-                      AM
-                    </span>
-
+                {homeNextClass ? (
+                  <div className="class-card">
+                    <div className="class-time">
+                      <strong>{formatScheduleTime(homeNextClass.startTime)}</strong>
+                      <span>to {formatScheduleTime(homeNextClass.endTime)}</span>
+                    </div>
+                    <div className="class-line"></div>
+                    <div className="class-details">
+                      <span className="upcoming-label">
+                        {isHomeClassInProgress ? "IN PROGRESS" : "UPCOMING"}
+                      </span>
+                      <h3>{homeNextClass.subject}</h3>
+                      <p>{homeNextClass.place || "Location not specified"}</p>
+                    </div>
+                    {homeClassBuilding ? (
+                      <button className="navigate-button" type="button" onClick={() => handleViewBuildingOnMap(homeClassBuilding)}>
+                        View on map <span aria-hidden="true">&rarr;</span>
+                      </button>
+                    ) : (
+                      <button className="navigate-button" type="button" onClick={goSchedule}>
+                        View schedule <span aria-hidden="true">&rarr;</span>
+                      </button>
+                    )}
                   </div>
-
-                  <div className="class-line"></div>
-
-                  <div className="class-details">
-
-                    <span className="upcoming-label">
-                      UPCOMING
-                    </span>
-
-                    <h3>
-                      Data Structures
-                    </h3>
-
-                    <p>
-                      CSE Block
-                      <b>•</b>
-                      Room 204
-                    </p>
-
+                ) : (
+                  <div className="class-card class-card-empty">
+                    <div className="class-empty-icon" aria-hidden="true">&#9638;</div>
+                    <div className="class-details">
+                      <span className="upcoming-label">TODAY</span>
+                      <h3>No classes scheduled</h3>
+                      <p>Your schedule is clear for today.</p>
+                    </div>
+                    <button className="navigate-button" type="button" onClick={goSchedule}>
+                      Open schedule <span aria-hidden="true">&rarr;</span>
+                    </button>
                   </div>
-
-                  <button
-                    className="navigate-button"
-                    type="button"
-                    onClick={goMap}
-                  >
-                    Navigate
-                    <span>→</span>
-                  </button>
-
-                </div>
+                )}
 
               </section>
 
